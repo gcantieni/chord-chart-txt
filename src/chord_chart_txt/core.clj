@@ -1,43 +1,71 @@
+
 (ns chord-chart-txt.core
   (:import (java.io BufferedReader FileReader))
   (:use hiccup.core)
   (:gen-class))
 
-(def style [:style
-  "
-  table {
-    width:100%;
-    padding-left:60px;
-    padding-right:60px;
-  }
-  th {
-    border: 1px solid black;
-    font-size: 30px;
-    padding-left:60px;
-    padding-right:60px;
-  }
-  html *
-  {
-   font-family: Arial !important;
-  }
-  h1 {
-    text-align: center;
-  }
-  td {
-    padding-top: 10px;
-    font-size: 23px;
-    padding-bottom:60px;
-  }
 
-  div {
-    text-align: justify;
-    height: 30px;
-  }
-  span{
-  width:100%;
-  height:0px;
-  display:inline-block;
-  }"])
+(defn inner-css-reducer [acc item]
+     (if (= (last acc) \space)
+       (str acc item \;"\n")
+       (str acc (name item) \:\space)))
+
+(defn add-css-separations [key-val-map]
+  "[:width '100px'] --> '{width:100px;}"
+  (reduce inner-css-reducer "" key-val-map))
+
+(defn style 
+  "(syle :table [:width '100px' :height '200px'])
+    --> 'table {width: 100px; height:200px;}' "
+  [style-table]
+  (reduce (fn [final-blocks block]
+            (if (coll? block)
+              (str final-blocks \space\{ (add-css-separations block) \}"\n")
+              (str final-blocks (name block))))
+          ""
+          style-table))
+
+; this is harder to represent because of the \* in the name
+(def special-style "html * {font-family: Arial !important;}")
+
+(def constant-style
+  (str (style [
+        :html* [:font-family "Arial !important"]
+        :h1 [:text-align "center"]
+        :span [:width "100%"
+               :height "0px"
+               :display "inline-block"]])
+       special-style))
+
+(def large-style
+  (style
+   [:table [:width "100%"
+            :padding-left "60px"
+            :padding-right "60px"]
+    :th [:border "1px solid black"
+         :font-size "25px"
+         :padding-left "60px"
+         :padding-right "60px"]
+    :div [:text-align "justify"
+          :height "30px"]
+    :td [:padding-top "10px"
+         :font-size "20px"
+         :padding-bottom "60px"]]))
+
+(def small-style
+  (style
+   [:table [:width "100%"
+            :padding-left "10px"
+            :padding-right "10px"]
+    :th [:border "1px solid black"
+         :font-size "16px"
+         :padding-left "10px"
+         :padding-right "10px"]
+    :div [:text-align "justify"
+          :height "18px"]
+    :td [:padding-top "10px"
+         :font-size "14px"
+         :padding-bottom "40px"]]))
 
 (defn table [table-innards]
   [:table table-innards])
@@ -95,25 +123,30 @@
 (defn make-table [file-name]
   (process-file file-name parse-table-line [:table]))
 
-(defn add-header [content]
-  "Add default header to content"
-  [:html
-   [:body
-    [:h2 "River"]
-    [:style "th { border: 1px solid black; }"]
-     content]])
+(defn get-style! [flags]
+  (if (= (first flags) "--small")
+    [:style (str constant-style small-style)]
+    [:style (str constant-style large-style)]))
+
+(defn flag? [possible-flag]
+  "flags start with the following characters: --"
+  (and (= (first possible-flag) \-) (= (second possible-flag) \-)))
+
+(defn convert-chart! [in-file out-file & flags]
+    (spit out-file
+        (html [:html
+                [:body
+                 (make-title in-file)
+                 [:style (get-style! flags)]
+                 (make-table in-file)]])))
 
 (defn -main
   [& args]
-  (cond
-    (= (first args) "-h") (println "input a path to a plaintext file with alternating verses and chords")
-    (not= (count args) 2) (println "usage: input-file output-file")
-    :else (let [in-file (first args)
-                out-file (second args)]
-             (spit out-file
-                   (html [:html
-                          [:body
-                           (make-title in-file)
-                           style
-                           (make-table in-file)]])))))
+  (let [files (filter (complement flag?) args)
+        flags (filter flag? args)]
+    (cond
+        (= (first args) "--help") (println "input a path to a plaintext file with alternating verses and chords\nIf it's a song with long verses, use the --small option")
+        (not= (count files) 2) (println "usage: input-file output-file")
+        :else
+        (convert-chart! (first files) (second files) (first flags)))))
 
