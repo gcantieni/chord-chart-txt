@@ -1,9 +1,7 @@
-
 (ns chord-chart-txt.core
   (:import (java.io BufferedReader FileReader))
   (:use hiccup.core)
   (:gen-class))
-
 
 (defn inner-css-reducer [acc item]
      (if (= (last acc) \space)
@@ -15,7 +13,9 @@
   (reduce inner-css-reducer "" key-val-map))
 
 (defn style 
-  "(syle :table [:width '100px' :height '200px'])
+  "Takes in a type that the style applies to and a vector of :key
+  'style pairs. For example:
+  (syle :table [:width '100px' :height '200px'])
     --> 'table {width: 100px; height:200px;}' "
   [style-table]
   (reduce (fn [final-blocks block]
@@ -28,6 +28,7 @@
 ; this is harder to represent because of the \* in the name
 (def special-style "html * {font-family: Arial !important;}")
 
+; style that is in common between all options
 (def constant-style
   (str (style [
         :html* [:font-family "Arial !important"]
@@ -37,6 +38,7 @@
                :display "inline-block"]])
        special-style))
 
+; large font size 
 (def large-style
   (style
    [:table [:width "100%"
@@ -52,6 +54,7 @@
          :font-size "20px"
          :padding-bottom "60px"]]))
 
+; small padding/font
 (def small-style
   (style
    [:table [:width "100%"
@@ -74,7 +77,7 @@
   "Put cells into table rows with either :td or :th tag"
   (reduce #(into %1 [[tag %2]]) [:tr] cells))
 
-(defn not-in-table? [line]
+(defn is-title? [line]
   (or (= (first line) \#) (= (count line) 0)))
 
 (defn lyric? [line]
@@ -94,8 +97,9 @@
   (map #(clojure.string/replace % "_" " ") (clojure.string/split line #" ")))
 
 (defn add-chord-tags [chords]
-  "Adds formatting tags to each chord, putting them in a div
-   and adding an empty span
+  "Adds formatting tags to each chord with is a SYMBOL, putting them in a div
+   and adding an empty span (this empty span is an html hack to ensure
+  even spacing of the chords within the table row)
    e.g. ('A' 'B C') --> [:tr [:th [:div [:span] 'A']] [:th [:div [:span] 'B C']]]"
   (reduce #(into %1 [[:th [:div %2  [:span]]]]) [:tr] chords))
 
@@ -104,24 +108,35 @@
   (let [line (trim-consec-whitespace line)]
     (cond
       (lyric? line) (into acc [(into-rows :td (split-lyrics line))])
-      (not-in-table? line) acc
+      (is-title? line) acc
       :else (into acc  [(add-chord-tags (split-chords line))])))) ; Assume it's chords
 
-(defn process-file [file-name reducer initial-value]
+(defn body-reducer [acc line]
+  (println (str "acc " acc))
+  (let [line (trim-consec-whitespace line)]
+    (cond
+      (is-title? line) acc ; ignore title
+      (lyric? line) (conj (drop-last acc) (conj (last acc) [(into-rows :td (split-lyrics line))]))
+      :else (conj acc [:table (add-chord-tags
+                                           (split-chords line))]))))
+     ;(= (first (last acc)) :td)  
+
+(defn reduce-file-lines [file-name reducer initial-value]
   (with-open [rdr (BufferedReader. (FileReader. file-name))]
     (reduce reducer initial-value (line-seq rdr))))
 
 (defn title-reducer [acc line]
+  "Find the title and return it in the form of the acc"
   (if (= (first line) \#)
     (reduced (do
                (into acc [(remove #{\#} line)])))
     acc))
 
-(defn make-title [file-name]
-  (process-file file-name title-reducer [:h1]))
+(defn extract-title [file-name]
+  (reduce-file-lines file-name title-reducer [:h1]))
 
-(defn make-table [file-name]
-  (process-file file-name parse-table-line [:table]))
+(defn convert-body [file-name]
+  (reduce-file-lines file-name parse-table-line [:table]))
 
 (defn get-style! [flags]
   (if (= (first flags) "--small")
@@ -136,11 +151,18 @@
     (spit out-file
         (html [:html
                 [:body
-                 (make-title in-file)
+                 (extract-title in-file)
                  [:style (get-style! flags)]
-                 (make-table in-file)]])))
+                 (convert-body in-file)]])))
+
 
 (defn -main
+  "Run on an input file and an ouput file with an optional argument to
+  get help (--help) or make the ouput smaller and thus fit the size of
+  a pdf (--small)
+
+  Within the development repl such as lein or cider you can run this
+  using (-main 'ex/lulu.txt' 'ex/lulu.html')"
   [& args]
   (let [files (filter (complement flag?) args)
         flags (filter flag? args)]
